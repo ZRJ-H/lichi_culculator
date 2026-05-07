@@ -1,0 +1,17 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependencies (最核心的，屏蔽依赖)
+node_modules/
+
+# Production (屏蔽本地打包产物)
+dist/
+dist-ssr/
+
+# Misc
+.env
+.env.local
+.DS_Store
+node_modules
