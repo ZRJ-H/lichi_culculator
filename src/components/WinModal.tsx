@@ -2,10 +2,11 @@ import { useState, useMemo } from 'react'
 import {
   X, Swords, Wind as WindIcon,
   Calculator, ChevronDown, ChevronUp,
-  Plus, Minus, Tag,
+  Plus, Minus, BookOpen,
 } from 'lucide-react'
 import { useGameStore, calcWinPreview } from '../store'
 import type { Wind } from '../store'
+import YakuDictionary from './YakuDictionary'
 
 // ─── Shared style helpers ──────────────────────────────────────────────────
 
@@ -100,8 +101,6 @@ const MELD_FU: Record<keyof MeldCounts, number> = {
   ym: 4, ya: 8, ymk: 16, yak: 32,
 }
 
-// Open-meld keys that are FORBIDDEN when base = 'menzen' (closed hand)
-const OPEN_MELD_KEYS: (keyof MeldCounts)[] = ['cm', 'cmk', 'ym', 'ymk']
 
 function calcFuFromInputs(
   special: SpecialHand,
@@ -126,11 +125,13 @@ function calcFuFromInputs(
 
 interface FuCalculatorProps {
   isTsumo: boolean
+  isRiichi: boolean   // Fix 1: riichi forces menzen & locks open melds
   onApply: (fu: number) => void
 }
 
-function FuCalculator({ isTsumo, onApply }: FuCalculatorProps) {
+function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
   const [special, setSpecial] = useState<SpecialHand>('none')
+  // Riichi always implies 門前清 — initialise accordingly and lock
   const [base,    setBase]    = useState<BaseType>('menzen')
   const [wait,    setWait]    = useState<WaitType>('normal')
   const [pair,    setPair]    = useState<PairType>('suupai')
@@ -140,19 +141,21 @@ function FuCalculator({ isTsumo, onApply }: FuCalculatorProps) {
 
   // ── Mutex: base changed ──────────────────────────────────────────────────
   const handleBaseChange = (newBase: BaseType) => {
+    // Riichi hand is always closed — cannot switch to 'other'
+    if (isRiichi && newBase === 'other') return
     setBase(newBase)
     if (newBase === 'menzen') {
-      // Close-hand: open melds impossible → zero & lock them
       setMelds((p) => ({ ...p, cm: 0, cmk: 0, ym: 0, ymk: 0 }))
     }
     if (newBase === 'other' && special === 'pinfu') {
-      // 副露/非門清: 平和 requires closed hand → unset it
       setSpecial('none')
     }
   }
 
-  const isMenzen  = base === 'menzen'
-  const isLocked  = special !== 'none'
+  // Open melds are impossible when the hand is closed (門前清 or Riichi)
+  const isMenzen       = base === 'menzen'
+  const openMeldLocked = isMenzen || isRiichi
+  const isLocked       = special !== 'none'
 
   const setMeld   = (key: keyof MeldCounts) => (n: number) =>
     setMelds((p) => ({ ...p, [key]: n }))
@@ -178,15 +181,19 @@ function FuCalculator({ isTsumo, onApply }: FuCalculatorProps) {
   }
 
   function MeldRow({
-    label, meldKey, fuEach, openDisabled,
-  }: { label: string; meldKey: keyof MeldCounts; fuEach: number; openDisabled?: boolean }) {
-    const disabled = openDisabled || isLocked
+    label, meldKey, fuEach, isOpenMeld,
+  }: { label: string; meldKey: keyof MeldCounts; fuEach: number; isOpenMeld?: boolean }) {
+    // Open melds (明刻/明杠) are disabled when the hand is closed or riichi
+    const disabled = (isOpenMeld && openMeldLocked) || isLocked
     return (
       <div className={`flex items-center justify-between rounded-xl px-3 py-2
         ${disabled ? 'bg-emerald-950/20 opacity-40' : 'bg-emerald-900/40'}`}>
         <span className="flex-1 text-xs font-bold text-emerald-100">
           {label}
           <span className="ml-1.5 text-violet-400">+{fuEach}</span>
+          {isOpenMeld && openMeldLocked && (
+            <span className="ml-1 text-xs text-rose-700">（门清/立直禁用）</span>
+          )}
         </span>
         <Counter
           value={melds[meldKey]}
@@ -236,12 +243,18 @@ function FuCalculator({ isTsumo, onApply }: FuCalculatorProps) {
             <TB active={base === 'menzen'} onClick={() => handleBaseChange('menzen')} color="border-sky-500 bg-sky-900/50">
               門前清荣和<br /><span className="font-normal opacity-70">30符</span>
             </TB>
-            <TB active={base === 'other'} onClick={() => handleBaseChange('other')} color="border-sky-500 bg-sky-900/50">
-              自摸 / 副露荣和<br /><span className="font-normal opacity-70">20符</span>
-            </TB>
+            {/* 副露 option is locked out when the winner is in riichi */}
+            <div className={isRiichi ? 'flex-1 opacity-30 pointer-events-none' : 'flex-1'}>
+              <TB active={base === 'other'} onClick={() => handleBaseChange('other')} color="border-sky-500 bg-sky-900/50">
+                自摸 / 副露荣和<br /><span className="font-normal opacity-70">20符</span>
+              </TB>
+            </div>
           </div>
+          {isRiichi && (
+            <p className="mt-1 text-xs text-rose-700">🔒 立直必须门前清，副露已锁定</p>
+          )}
           {isTsumo && <p className="mt-1 text-xs text-sky-600">✦ 自摸加符 +2 已自动计入</p>}
-          {isMenzen && (
+          {openMeldLocked && !isRiichi && (
             <p className="mt-1 text-xs text-amber-700">⚠ 門前清：明刻 / 明杠 已禁用</p>
           )}
         </div>
@@ -273,9 +286,9 @@ function FuCalculator({ isTsumo, onApply }: FuCalculatorProps) {
         <div>
           <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-violet-400">面子 · 中张（2-8）</p>
           <div className="space-y-1.5">
-            <MeldRow label="明刻" meldKey="cm"  fuEach={2}  openDisabled={isMenzen} />
+            <MeldRow label="明刻" meldKey="cm"  fuEach={2}  isOpenMeld />
             <MeldRow label="暗刻" meldKey="ca"  fuEach={4} />
-            <MeldRow label="明杠" meldKey="cmk" fuEach={8}  openDisabled={isMenzen} />
+            <MeldRow label="明杠" meldKey="cmk" fuEach={8}  isOpenMeld />
             <MeldRow label="暗杠" meldKey="cak" fuEach={16} />
           </div>
         </div>
@@ -284,9 +297,9 @@ function FuCalculator({ isTsumo, onApply }: FuCalculatorProps) {
         <div>
           <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-violet-400">面子 · 幺九（1, 9, 字牌）</p>
           <div className="space-y-1.5">
-            <MeldRow label="明刻" meldKey="ym"  fuEach={4}  openDisabled={isMenzen} />
+            <MeldRow label="明刻" meldKey="ym"  fuEach={4}  isOpenMeld />
             <MeldRow label="暗刻" meldKey="ya"  fuEach={8} />
-            <MeldRow label="明杠" meldKey="ymk" fuEach={16} openDisabled={isMenzen} />
+            <MeldRow label="明杠" meldKey="ymk" fuEach={16} isOpenMeld />
             <MeldRow label="暗杠" meldKey="yak" fuEach={32} />
           </div>
         </div>
@@ -312,6 +325,47 @@ function FuCalculator({ isTsumo, onApply }: FuCalculatorProps) {
   )
 }
 
+// ─── Han button helpers ─────────────────────────────────────────────────────
+
+const HAN_NORMAL = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+const HAN_YAKUMAN = [13, 14, 15, 16, 17, 18]
+
+function hanLabel(h: number): string {
+  if (h <= 12) return `${h}番`
+  if (h === 13) return '役満'
+  return `${h - 12}倍役満`
+}
+
+/** Small sub-label showing the mangan tier name */
+function hanTier(h: number): string {
+  if (h <= 4)  return ''
+  if (h === 5)  return '満貫'
+  if (h <= 7)  return '跳満'
+  if (h <= 10) return '倍満'
+  if (h <= 12) return '三倍満'
+  return ''
+}
+
+/** Tailwind classes for the button (inactive state) */
+function hanIdleClass(h: number): string {
+  if (h <= 4)  return 'border-emerald-800 bg-emerald-900/30 text-emerald-400 hover:border-emerald-600 hover:text-emerald-200'
+  if (h === 5)  return 'border-amber-900/70 bg-amber-950/30 text-amber-600 hover:border-amber-600 hover:text-amber-300'
+  if (h <= 7)  return 'border-orange-900/70 bg-orange-950/30 text-orange-600 hover:border-orange-600 hover:text-orange-300'
+  if (h <= 10) return 'border-rose-900/70 bg-rose-950/30 text-rose-600 hover:border-rose-600 hover:text-rose-300'
+  if (h <= 12) return 'border-red-900/70 bg-red-950/30 text-red-600 hover:border-red-600 hover:text-red-300'
+  return 'border-yellow-900/60 bg-yellow-950/30 text-yellow-700 hover:border-yellow-700 hover:text-yellow-400'
+}
+
+/** Tailwind classes for the button (active/selected state) */
+function hanActiveClass(h: number): string {
+  if (h <= 4)  return 'border-emerald-400 bg-emerald-700 text-white shadow-md shadow-emerald-950'
+  if (h === 5)  return 'border-amber-400 bg-amber-700 text-white shadow-md shadow-amber-950'
+  if (h <= 7)  return 'border-orange-400 bg-orange-700 text-white shadow-md shadow-orange-950'
+  if (h <= 10) return 'border-rose-400 bg-rose-700 text-white shadow-md shadow-rose-950'
+  if (h <= 12) return 'border-red-400 bg-red-800 text-white shadow-md shadow-red-950'
+  return 'border-yellow-400 bg-yellow-700 text-white shadow-md shadow-yellow-950'
+}
+
 // ─── Main WinModal ──────────────────────────────────────────────────────────
 
 interface WinModalProps {
@@ -323,19 +377,17 @@ export default function WinModal({ onClose }: WinModalProps) {
   const roundState = useGameStore((s) => s.roundState)
   const handleWin  = useGameStore((s) => s.handleWin)
 
-  // ── Core selections ──────────────────────────────────────────────────────
+  // ── Selections ───────────────────────────────────────────────────────────
   const [winnerId, setWinnerId] = useState<number>(players[0].id)
-  const [loserId,  setLoserId]  = useState<number | null>(null)  // null = tsumo
+  const [loserId,  setLoserId]  = useState<number | null>(null)
 
-  // ── Han composition ──────────────────────────────────────────────────────
-  const [yakuHan, setYakuHan] = useState<number>(1)   // 役種番数 (1-18)
-  const [dora,    setDora]    = useState<number>(0)   // 表宝牌 / 拔北
-  const [akaDora, setAkaDora] = useState<number>(0)   // 赤宝牌 (max 3)
-  const [uraDora, setUraDora] = useState<number>(0)   // 里宝牌
+  // ── Total han (player inputs the final number directly) ──────────────────
+  const [han, setHan] = useState<number>(1)
 
   // ── Fu ───────────────────────────────────────────────────────────────────
   const [fu,          setFu]          = useState<number>(30)
   const [showFuCalc,  setShowFuCalc]  = useState(false)
+  const [showYakuDict, setShowYakuDict] = useState(false)
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const winner         = players.find((p) => p.id === winnerId)!
@@ -343,316 +395,264 @@ export default function WinModal({ onClose }: WinModalProps) {
   const isTsumo        = loserId === null
   const loserCandidates = players.filter((p) => p.id !== winnerId)
 
-  // Yakuman & above: dora / riichi don't stack in standard rules
-  const isYakuman  = yakuHan >= 13
-  const riichiHan  = !isYakuman && winnerIsRiichi ? 1 : 0
-  const totalDora  = isYakuman ? 0 : dora + akaDora + uraDora
-  const totalHan   = yakuHan + riichiHan + totalDora
-  const isHighHan  = totalHan >= 5
+  const isHighHan  = han >= 5
+  const isYakuman  = han >= 13
   const effectiveFu = isHighHan ? 30 : fu
 
   // ── Live preview ─────────────────────────────────────────────────────────
   const preview = useMemo(
-    () => calcWinPreview(players, roundState, winnerId, loserId, totalHan, effectiveFu),
-    [players, roundState, winnerId, loserId, totalHan, effectiveFu],
+    () => calcWinPreview(players, roundState, winnerId, loserId, han, effectiveFu),
+    [players, roundState, winnerId, loserId, han, effectiveFu],
   )
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleWinnerChange = (id: number) => {
     setWinnerId(id)
     if (loserId === id) setLoserId(null)
-    // Reset ura dora when winner changes (riichi state may differ)
-    setUraDora(0)
+    setShowFuCalc(false)
   }
 
-  const handleYakuHanChange = (h: number) => {
-    setYakuHan(h)
-    if (h >= 5) setShowFuCalc(false)
-    if (h >= 13) { setDora(0); setAkaDora(0); setUraDora(0) }
+  const selectHan = (h: number) => {
+    setHan(h)
+    setShowFuCalc(false)
   }
 
   const onConfirm = () => {
-    handleWin(winnerId, loserId, totalHan, effectiveFu)
+    handleWin(winnerId, loserId, han, effectiveFu)
     onClose()
   }
 
-  // ── Han label helpers ─────────────────────────────────────────────────────
-  const YAKU_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-  const yakuLabel = (h: number) => {
-    if (h >= 14) return `${h - 12}倍\n役満`
-    if (h === 13) return '役満'
-    return `${h}番`
-  }
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 backdrop-blur-sm"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border-t border-emerald-700 bg-emerald-950 shadow-2xl">
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 backdrop-blur-sm"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border-t border-emerald-700 bg-emerald-950 shadow-2xl">
 
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between border-b border-emerald-800 px-5 py-4">
-          <div className="flex items-center gap-2">
-            <Swords className="h-5 w-5 text-sky-400" />
-            <span className="text-lg font-black tracking-widest text-white">和牌结算</span>
+          {/* ── Header ── */}
+          <div className="flex items-center justify-between border-b border-emerald-800 px-5 py-4">
+            <div className="flex items-center gap-2">
+              <Swords className="h-5 w-5 text-sky-400" />
+              <span className="text-lg font-black tracking-widest text-white">和牌结算</span>
+            </div>
+            <button onClick={onClose} className="rounded-full p-1.5 text-emerald-500 hover:bg-emerald-800 hover:text-white transition-colors">
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button onClick={onClose} className="rounded-full p-1.5 text-emerald-500 hover:bg-emerald-800 hover:text-white transition-colors">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
 
-        {/* ── Scrollable body ── */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {/* ── Scrollable body ── */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
 
-          {/* ── 和牌者 ── */}
-          <section>
-            <SectionLabel icon={<WindIcon className="h-3.5 w-3.5" />} title="和牌者" />
-            <div className="flex gap-2">
-              {players.map((p) => (
-                <RadioCard key={p.id} selected={winnerId === p.id}
-                  onClick={() => handleWinnerChange(p.id)} accent="border-sky-500 bg-sky-900/50">
-                  <span className={`block text-base ${WIND_COLOR[p.wind]}`}>{p.wind}</span>
-                  <span className="block text-xs text-white/80">{p.name}</span>
-                </RadioCard>
-              ))}
-            </div>
-
-            {/* 立直 badge */}
-            {winnerIsRiichi && (
-              <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-rose-700 bg-rose-950/60 px-3 py-2">
-                <Tag className="h-4 w-4 shrink-0 text-rose-400" />
-                <span className="text-sm font-bold text-rose-300">
-                  已立直
-                  <span className="ml-1.5 font-black text-rose-200">自动 +1番</span>
-                </span>
-                {isTsumo && (
-                  <span className="ml-auto rounded-full bg-rose-800/60 px-2 py-0.5 text-xs text-rose-300">
-                    自摸立直
-                  </span>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* ── 放铳者 / 自摸 ── */}
-          <section>
-            <SectionLabel title="放铳者 / 自摸" />
-            <div className="flex flex-wrap gap-2">
-              <RadioCard selected={isTsumo} onClick={() => setLoserId(null)} accent="border-emerald-500 bg-emerald-900/60">
-                <span className="block text-base">🀄</span>
-                <span className="block text-xs">自摸</span>
-              </RadioCard>
-              {loserCandidates.map((p) => (
-                <RadioCard key={p.id} selected={loserId === p.id}
-                  onClick={() => setLoserId(p.id)} accent="border-rose-500 bg-rose-900/50">
-                  <span className={`block text-base ${WIND_COLOR[p.wind]}`}>{p.wind}</span>
-                  <span className="block text-xs text-white/80">{p.name}</span>
-                </RadioCard>
-              ))}
-            </div>
-          </section>
-
-          {/* ── 役種番数 ── */}
-          <section>
-            <SectionLabel title="役种番数" />
-            <div className="flex flex-wrap gap-2">
-              {YAKU_OPTIONS.map((h) => (
-                <button key={h} type="button" onClick={() => handleYakuHanChange(h)}
-                  className={`
-                    min-w-[3rem] whitespace-pre-line rounded-xl border-2 py-2 px-2
-                    text-center text-xs font-black leading-tight
-                    transition-all duration-150 active:scale-95
-                    ${yakuHan === h
-                      ? 'border-amber-500 bg-amber-900/60 text-amber-200 shadow-md'
-                      : h >= 14
-                      ? 'border-yellow-900 bg-yellow-950/40 text-yellow-700 hover:border-yellow-700 hover:text-yellow-400'
-                      : 'border-emerald-800 bg-emerald-900/30 text-emerald-400'
-                    }
-                  `}
-                >
-                  {yakuLabel(h)}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          {/* ── 宝牌 (hidden for 役満+) ── */}
-          {!isYakuman ? (
+            {/* ── 和牌者 ── */}
             <section>
-              <SectionLabel title="宝牌" />
-              <div className="space-y-2">
-                {/* 表宝牌 / 拔北 */}
-                <div className="flex items-center justify-between rounded-xl border border-emerald-800 bg-emerald-900/30 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-bold text-emerald-100">表宝牌 / 拔北 Dora</p>
-                    <p className="text-xs text-emerald-600">每张 +1番</p>
-                  </div>
-                  <Counter value={dora} onChange={setDora} />
+              <SectionLabel icon={<WindIcon className="h-3.5 w-3.5" />} title="和牌者" />
+              <div className="flex gap-2">
+                {players.map((p) => (
+                  <RadioCard key={p.id} selected={winnerId === p.id}
+                    onClick={() => handleWinnerChange(p.id)} accent="border-sky-500 bg-sky-900/50">
+                    <span className={`block text-base ${WIND_COLOR[p.wind]}`}>{p.wind}</span>
+                    <span className="block text-xs text-white/80">{p.name}</span>
+                  </RadioCard>
+                ))}
+              </div>
+              {winnerIsRiichi && (
+                <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-rose-800 bg-rose-950/50 px-3 py-2">
+                  <span className="text-rose-400">🀄</span>
+                  <span className="text-sm font-bold text-rose-300">
+                    已立直 — 番数中请自行计入立直 / 里宝牌
+                  </span>
                 </div>
+              )}
+            </section>
 
-                {/* 赤宝牌 */}
-                <div className="flex items-center justify-between rounded-xl border border-orange-900 bg-orange-950/30 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-bold text-orange-200">赤宝牌 Aka Dora</p>
-                    <p className="text-xs text-orange-700">红五万/饼/索，最多 3 张</p>
-                  </div>
-                  <Counter value={akaDora} max={3} onChange={setAkaDora} />
-                </div>
-
-                {/* 里宝牌 — 仅立直时显示 */}
-                {winnerIsRiichi && (
-                  <div className="flex items-center justify-between rounded-xl border border-rose-900 bg-rose-950/30 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-bold text-rose-200">里宝牌 Ura Dora</p>
-                      <p className="text-xs text-rose-800">立直和牌后翻开</p>
-                    </div>
-                    <Counter value={uraDora} onChange={setUraDora} />
-                  </div>
-                )}
+            {/* ── 放铳者 / 自摸 ── */}
+            <section>
+              <SectionLabel title="放铳者 / 自摸" />
+              <div className="flex flex-wrap gap-2">
+                <RadioCard selected={isTsumo} onClick={() => setLoserId(null)} accent="border-emerald-500 bg-emerald-900/60">
+                  <span className="block text-base">🀄</span>
+                  <span className="block text-xs">自摸</span>
+                </RadioCard>
+                {loserCandidates.map((p) => (
+                  <RadioCard key={p.id} selected={loserId === p.id}
+                    onClick={() => setLoserId(p.id)} accent="border-rose-500 bg-rose-900/50">
+                    <span className={`block text-base ${WIND_COLOR[p.wind]}`}>{p.wind}</span>
+                    <span className="block text-xs text-white/80">{p.name}</span>
+                  </RadioCard>
+                ))}
               </div>
             </section>
-          ) : (
-            <div className="rounded-xl border border-yellow-900 bg-yellow-950/30 px-4 py-3 text-xs text-yellow-600">
-              役満以上：宝牌不计入（基础点固定）
-            </div>
-          )}
 
-          {/* ── 番数汇总 ── */}
-          <section className="rounded-2xl border border-emerald-700 bg-emerald-900/20 px-4 py-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* 役種 */}
-              <span className="rounded-lg bg-amber-900/50 px-2.5 py-1 text-sm font-black text-amber-200">
-                役种 {yakuHan}番
-              </span>
-              {!isYakuman && (
-                <>
-                  {winnerIsRiichi && (
-                    <>
-                      <span className="text-emerald-700">+</span>
-                      <span className="rounded-lg bg-rose-900/50 px-2.5 py-1 text-sm font-black text-rose-300">
-                        立直 1番
-                      </span>
-                    </>
-                  )}
-                  {totalDora > 0 && (
-                    <>
-                      <span className="text-emerald-700">+</span>
-                      <span className="rounded-lg bg-orange-900/50 px-2.5 py-1 text-sm font-black text-orange-300">
-                        宝牌 {totalDora}番
-                        {uraDora > 0 && winnerIsRiichi && (
-                          <span className="ml-1 text-xs font-normal opacity-70">（含里{uraDora}）</span>
-                        )}
-                      </span>
-                    </>
-                  )}
-                </>
-              )}
-              <span className="text-emerald-700">=</span>
-              <span className="rounded-lg bg-sky-800/60 px-3 py-1 text-base font-black text-sky-200">
-                {totalHan}番
-              </span>
-              <span className="ml-auto rounded-full bg-amber-800/50 px-3 py-0.5 text-sm font-black text-amber-300">
-                {preview.level}
-              </span>
-            </div>
-          </section>
-
-          {/* ── 符数 (hidden when totalHan >= 5) ── */}
-          {!isHighHan && (
+            {/* ── 最终总番数 ── */}
             <section>
-              <SectionLabel title="符数" />
-              <div className="flex flex-wrap gap-2">
-                {[20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110].map((f) => (
-                  <button key={f} type="button" onClick={() => setFu(f)}
-                    className={`
-                      rounded-xl border-2 py-2 px-3 text-sm font-black
-                      transition-all duration-150 active:scale-95
-                      ${fu === f
-                        ? 'border-violet-500 bg-violet-900/60 text-violet-200 shadow-md'
-                        : 'border-emerald-800 bg-emerald-900/30 text-emerald-400'
-                      }
-                    `}
+              {/* Section header with dictionary button */}
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-emerald-500">
+                  <span>最终总番数</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowYakuDict(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-900/40 px-2.5 py-1.5 text-xs font-bold text-emerald-400 transition-all hover:border-emerald-500 hover:text-emerald-200 active:scale-95"
+                >
+                  <BookOpen className="h-3.5 w-3.5" />
+                  役种速查表
+                </button>
+              </div>
+
+              {/* 1–4番 grid */}
+              <div className="mb-1.5 grid grid-cols-4 gap-1.5">
+                {HAN_NORMAL.slice(0, 4).map((h) => (
+                  <button key={h} type="button" onClick={() => selectHan(h)}
+                    className={`rounded-xl border-2 py-3 text-sm font-black transition-all active:scale-95
+                      ${han === h ? hanActiveClass(h) : hanIdleClass(h)}`}
                   >
-                    {f === 25 ? '25符\n七対' : `${f}符`}
+                    {hanLabel(h)}
                   </button>
                 ))}
               </div>
 
-              {/* FuCalc toggle */}
-              <button
-                type="button"
-                onClick={() => setShowFuCalc((v) => !v)}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-violet-800 bg-violet-950/30 py-2.5 text-sm font-bold text-violet-400 transition-all hover:bg-violet-900/30 hover:text-violet-200 active:scale-95"
-              >
-                <Calculator className="h-4 w-4" />
-                算符辅助
-                {showFuCalc
-                  ? <ChevronUp className="h-4 w-4 ml-auto" />
-                  : <ChevronDown className="h-4 w-4 ml-auto" />
-                }
-              </button>
-
-              {showFuCalc && (
-                <div className="mt-3">
-                  <FuCalculator
-                    isTsumo={isTsumo}
-                    onApply={(calcedFu) => { setFu(calcedFu); setShowFuCalc(false) }}
-                  />
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* ── 结算预览 ── */}
-          <section className="rounded-2xl border border-emerald-700 bg-emerald-900/30 p-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-emerald-500">结算预览</p>
-            <div className="space-y-1.5">
-              {preview.payments.map(({ playerId, delta }) => {
-                const p = players.find((pl) => pl.id === playerId)!
-                const isWinner = playerId === winnerId
-                return (
-                  <div key={playerId}
-                    className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-sm
-                      ${isWinner ? 'bg-sky-900/40 text-sky-200'
-                        : delta < 0 ? 'bg-rose-950/40 text-rose-300'
-                        : 'bg-emerald-900/20 text-emerald-400'}`}
+              {/* 5–12番 grid (2 rows × 4) */}
+              <div className="mb-1.5 grid grid-cols-4 gap-1.5">
+                {HAN_NORMAL.slice(4).map((h) => (
+                  <button key={h} type="button" onClick={() => selectHan(h)}
+                    className={`flex flex-col items-center justify-center rounded-xl border-2 py-2.5 transition-all active:scale-95
+                      ${han === h ? hanActiveClass(h) : hanIdleClass(h)}`}
                   >
-                    <span className="font-medium">
-                      <span className={`mr-1.5 ${WIND_COLOR[p.wind]}`}>{p.wind}</span>
-                      {p.name}
-                      {isWinner && <span className="ml-1.5 text-xs text-sky-400">（和牌）</span>}
-                    </span>
-                    <span className="font-black tabular-nums">
-                      {delta > 0 ? '+' : ''}{delta.toLocaleString()}
-                    </span>
+                    <span className="text-sm font-black leading-none">{hanLabel(h)}</span>
+                    {hanTier(h) && (
+                      <span className={`mt-0.5 text-[10px] font-bold leading-none opacity-70`}>
+                        {hanTier(h)}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* 役満以上 */}
+              <div className="grid grid-cols-3 gap-1.5">
+                {HAN_YAKUMAN.map((h) => (
+                  <button key={h} type="button" onClick={() => selectHan(h)}
+                    className={`rounded-xl border-2 py-2.5 text-xs font-black transition-all active:scale-95
+                      ${han === h ? hanActiveClass(h) : hanIdleClass(h)}`}
+                  >
+                    {hanLabel(h)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Current selection badge */}
+              <div className={`mt-2.5 flex items-center justify-between rounded-xl px-4 py-2.5
+                ${isYakuman ? 'border border-yellow-800 bg-yellow-950/30' : 'border border-emerald-800 bg-emerald-900/20'}`}>
+                <span className="text-xs text-emerald-600">已选择</span>
+                <span className={`text-base font-black ${isYakuman ? 'text-yellow-300' : 'text-white'}`}>
+                  {hanLabel(han)}
+                  {hanTier(han) && <span className="ml-1.5 text-xs font-bold opacity-60">{hanTier(han)}</span>}
+                </span>
+                <span className="rounded-full bg-amber-800/50 px-3 py-0.5 text-sm font-black text-amber-300">
+                  {preview.level}
+                </span>
+              </div>
+            </section>
+
+            {/* ── 符数 (only for 1–4番) ── */}
+            {!isHighHan && (
+              <section>
+                <SectionLabel title="符数" />
+                <div className="flex flex-wrap gap-2">
+                  {[20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110].map((f) => (
+                    <button key={f} type="button" onClick={() => setFu(f)}
+                      className={`
+                        rounded-xl border-2 py-2 px-3 text-sm font-black
+                        transition-all duration-150 active:scale-95
+                        ${fu === f
+                          ? 'border-violet-500 bg-violet-900/60 text-violet-200 shadow-md'
+                          : 'border-emerald-800 bg-emerald-900/30 text-emerald-400 hover:border-emerald-600'
+                        }
+                      `}
+                    >
+                      {f === 25 ? '25\n七対' : `${f}符`}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFuCalc((v) => !v)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-violet-800 bg-violet-950/30 py-2.5 text-sm font-bold text-violet-400 transition-all hover:bg-violet-900/30 hover:text-violet-200 active:scale-95"
+                >
+                  <Calculator className="h-4 w-4" />
+                  算符辅助
+                  {showFuCalc
+                    ? <ChevronUp className="h-4 w-4 ml-auto" />
+                    : <ChevronDown className="h-4 w-4 ml-auto" />
+                  }
+                </button>
+                {showFuCalc && (
+                  <div className="mt-3">
+                    <FuCalculator
+                      isTsumo={isTsumo}
+                      isRiichi={winnerIsRiichi}
+                      onApply={(calcedFu) => { setFu(calcedFu); setShowFuCalc(false) }}
+                    />
                   </div>
-                )
-              })}
-            </div>
-            <p className="mt-3 text-center text-xs text-emerald-600">
-              {winner.name} 共获得{' '}
-              <span className="font-black text-sky-400">+{preview.winnerTotal.toLocaleString()}</span> 点
-              {roundState.riichiPool > 0 && (
-                <span className="ml-1 text-amber-500">（含 {roundState.riichiPool} 根立直棒）</span>
-              )}
-            </p>
-          </section>
+                )}
+              </section>
+            )}
 
-        </div>
+            {/* ── 结算预览 ── */}
+            <section className="rounded-2xl border border-emerald-700 bg-emerald-900/30 p-4">
+              <p className="mb-3 text-xs font-bold uppercase tracking-widest text-emerald-500">结算预览</p>
+              <div className="space-y-1.5">
+                {preview.payments.map(({ playerId, delta }) => {
+                  const p = players.find((pl) => pl.id === playerId)!
+                  const isWinner = playerId === winnerId
+                  return (
+                    <div key={playerId}
+                      className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-sm
+                        ${isWinner ? 'bg-sky-900/40 text-sky-200'
+                          : delta < 0 ? 'bg-rose-950/40 text-rose-300'
+                          : 'bg-emerald-900/20 text-emerald-400'}`}
+                    >
+                      <span className="font-medium">
+                        <span className={`mr-1.5 ${WIND_COLOR[p.wind]}`}>{p.wind}</span>
+                        {p.name}
+                        {isWinner && <span className="ml-1.5 text-xs text-sky-400">（和牌）</span>}
+                      </span>
+                      <span className="font-black tabular-nums">
+                        {delta > 0 ? '+' : ''}{delta.toLocaleString()}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="mt-3 text-center text-xs text-emerald-600">
+                {winner.name} 共获得{' '}
+                <span className="font-black text-sky-400">+{preview.winnerTotal.toLocaleString()}</span> 点
+                {roundState.riichiPool > 0 && (
+                  <span className="ml-1 text-amber-500">（含 {roundState.riichiPool} 根立直棒）</span>
+                )}
+              </p>
+            </section>
 
-        {/* ── Footer ── */}
-        <div className="flex gap-3 border-t border-emerald-800 px-5 py-4">
-          <button onClick={onClose}
-            className="flex-1 rounded-2xl border-2 border-emerald-700 py-3.5 font-bold text-emerald-400 transition-all active:scale-95 hover:border-emerald-500 hover:text-emerald-200">
-            取消
-          </button>
-          <button onClick={onConfirm}
-            className="flex-[2] rounded-2xl bg-sky-600 py-3.5 font-black text-white shadow-lg shadow-sky-900 transition-all active:scale-95 hover:bg-sky-500">
-            确认和牌
-          </button>
+          </div>
+
+          {/* ── Footer ── */}
+          <div className="flex gap-3 border-t border-emerald-800 px-5 py-4">
+            <button onClick={onClose}
+              className="flex-1 rounded-2xl border-2 border-emerald-700 py-3.5 font-bold text-emerald-400 transition-all active:scale-95 hover:border-emerald-500 hover:text-emerald-200">
+              取消
+            </button>
+            <button onClick={onConfirm}
+              className="flex-[2] rounded-2xl bg-sky-600 py-3.5 font-black text-white shadow-lg shadow-sky-900 transition-all active:scale-95 hover:bg-sky-500">
+              确认和牌
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* ── 役种速查表 (higher z-index, rendered as sibling) ── */}
+      {showYakuDict && <YakuDictionary onClose={() => setShowYakuDict(false)} />}
+    </>
   )
 }
