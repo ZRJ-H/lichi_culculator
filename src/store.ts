@@ -104,8 +104,18 @@ function levelLabel(han: number, fu: number): string {
 }
 
 /**
- * Detect whether we just completed a 过庄 (non-dealer advancement) out of
- * the game's final round, which triggers the end-condition score check.
+ * True when we have entered extended play (南入 / 西入).
+ * East rule:  any round past 東場 (i.e. wind index > 0)
+ * South rule: any round past 南場 (i.e. wind index > 1)
+ */
+function isInExtendedPlay(round: RoundState, gameRule: GameRule): boolean {
+  const mainFinalWind: Wind = gameRule === 'east' ? '東' : '南'
+  return WIND_ORDER.indexOf(round.wind) > WIND_ORDER.indexOf(mainFinalWind)
+}
+
+/**
+ * Detect whether we just completed a 过庄 out of the game's final main round,
+ * which is the moment we first enter extended play.
  */
 function passedFinalRound(
   oldRound: RoundState,
@@ -116,23 +126,41 @@ function passedFinalRound(
   return (
     oldRound.wind === finalWind &&
     oldRound.roundNum === 4 &&
-    newRound.roundNum === 1  // 过庄 from round 4 always resets to 1
+    newRound.roundNum === 1
   )
 }
 
-/** Returns true if the game should end (tobi or score condition met). */
+/**
+ * Returns true if the game should end.
+ * Priority:
+ *   1. Tobi — any player below zero.
+ *   2. Entering extended play — 过庄 past the final main round: end if
+ *      max score ≥ 30000, otherwise continue into extended play.
+ *   3. Already in extended play — end immediately if any player ≥ 30000
+ *      (Agari-yame applies to every round including dealer wins).
+ */
 function shouldGameEnd(
   players: Player[],
   oldRound: RoundState,
   newRound: RoundState,
   gameRule: GameRule,
-  isGuazhuang: boolean,   // true = 过庄 just happened
+  isGuazhuang: boolean,
 ): boolean {
   if (players.some((p) => p.score < 0)) return true
+
+  // Transitioning INTO extended play
   if (isGuazhuang && passedFinalRound(oldRound, newRound, gameRule)) {
     const maxScore = Math.max(...players.map((p) => p.score))
     if (maxScore >= 30000) return true
+    // else: max < 30000 → continue into extended play (fall through)
   }
+
+  // Already IN extended play: any player ≥ 30000 ends the game
+  if (isInExtendedPlay(newRound, gameRule)) {
+    const maxScore = Math.max(...players.map((p) => p.score))
+    if (maxScore >= 30000) return true
+  }
+
   return false
 }
 
