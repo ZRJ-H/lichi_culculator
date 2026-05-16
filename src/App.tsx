@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Coins, RotateCcw, Trophy, Waves } from 'lucide-react'
+import { ArrowLeft, Coins, RotateCcw, Trophy, Waves } from 'lucide-react'
 import { useGameStore } from './store'
 import type { Player, Wind, GameRule } from './store'
 import WinModal from './components/WinModal'
 import DrawModal from './components/DrawModal'
 import GameOverModal from './components/GameOverModal'
+import HomeScreen from './components/HomeScreen'
+import CalculatorView from './components/Calculator'
 
 const WIND_COLOR: Record<Wind, string> = {
   東: 'text-emerald-300',
@@ -103,6 +105,9 @@ function RuleToggle() {
 // ── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  type Screen = 'home' | 'game' | 'calculator'
+  const [screen, setScreen] = useState<Screen>('home')
+
   const roundState = useGameStore((s) => s.roundState)
   const players = useGameStore((s) => s.players)
   const undoLast = useGameStore((s) => s.undoLast)
@@ -113,13 +118,29 @@ export default function App() {
   const roundLabel = `${roundState.wind}${roundState.roundNum}局`
   const honbaLabel = `${roundState.honba}本場`
 
+  if (screen === 'home') {
+    return <HomeScreen onNavigate={setScreen} />
+  }
+
+  if (screen === 'calculator') {
+    return <CalculatorView onBack={() => setScreen('home')} />
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-emerald-950 text-white">
 
       {/* Top bar */}
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-emerald-800 bg-emerald-950/90 px-4 py-3 backdrop-blur-sm">
-        {/* Left: rule toggle */}
-        <RuleToggle />
+        {/* Left: back + rule toggle */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setScreen('home')}
+            className="rounded-lg p-1.5 text-emerald-500 hover:bg-emerald-800 hover:text-white transition-colors"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <RuleToggle />
+        </div>
 
         {/* Center: round info */}
         <div className="flex flex-col items-center">

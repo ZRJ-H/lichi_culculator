@@ -59,7 +59,7 @@ const WIND_ROTATE: Record<Wind, Wind> = {
 
 // ─── Scoring helpers ───────────────────────────────────────────────────────
 
-function ceil100(n: number): number {
+export function ceil100(n: number): number {
   return Math.ceil(n / 100) * 100
 }
 
@@ -70,7 +70,7 @@ function ceil100(n: number): number {
  * han 5-12 = normal mangan levels
  * han 1-4  = fu × 2^(han+2), with mangan caps
  */
-function calcBase(han: number, fu: number): number {
+export function calcBase(han: number, fu: number): number {
   if (han >= 14) return (han - 12) * 8000   // 2倍役満=16000, 3倍=24000 …
   if (han === 13) return 8000               // 役満
   const raw = fu * Math.pow(2, han + 2)
@@ -87,7 +87,7 @@ function calcBase(han: number, fu: number): number {
 }
 
 /** Human-readable level label */
-function levelLabel(han: number, fu: number): string {
+export function levelLabel(han: number, fu: number): string {
   if (han >= 14) return `${han - 12}倍役満`
   if (han === 13) return '役満'
   const raw = fu * Math.pow(2, han + 2)
