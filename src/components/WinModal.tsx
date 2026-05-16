@@ -82,7 +82,10 @@ function Counter({ value, min = 0, max = 99, onChange, disabled = false }: Count
 
 type SpecialHand = 'none' | 'chiitoi' | 'pinfu'
 type WaitType   = 'normal' | 'hard'   // normal=両面/双碰  hard=嵌張/辺張/単騎
-type PairType   = 'suupai' | 'yakuhai' | 'renfuu'
+type PairType   = 'chuuchan' | 'honour' | 'renfuu'
+// chuuchan = 中张数牌(2-8)/客风 → +0
+// honour   = 幺九数牌(1/9)/役牌(三元/场风/自风) → +2
+// renfuu   = 连风(场风+自风) → +4
 type BaseType   = 'menzen' | 'other'
 
 interface MeldCounts {
@@ -116,7 +119,7 @@ function calcFuFromInputs(
   const baseFu  = base === 'menzen' ? 30 : 20
   const tsumoFu = isTsumo ? 2 : 0
   const waitFu  = wait === 'hard' ? 2 : 0
-  const pairFu  = pair === 'yakuhai' ? 2 : pair === 'renfuu' ? 4 : 0
+  const pairFu  = pair === 'honour' ? 2 : pair === 'renfuu' ? 4 : 0
   const meldFu  = (Object.keys(melds) as (keyof MeldCounts)[])
     .reduce((s, k) => s + melds[k] * MELD_FU[k], 0)
 
@@ -134,7 +137,7 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
   // Riichi always implies 門前清 — initialise accordingly and lock
   const [base,    setBase]    = useState<BaseType>('menzen')
   const [wait,    setWait]    = useState<WaitType>('normal')
-  const [pair,    setPair]    = useState<PairType>('suupai')
+  const [pair,    setPair]    = useState<PairType>('chuuchan')
   const [melds,   setMelds]   = useState<MeldCounts>({
     cm: 0, ca: 0, cmk: 0, cak: 0, ym: 0, ya: 0, ymk: 0, yak: 0,
   })
@@ -155,7 +158,11 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
   // Open melds are impossible when the hand is closed (門前清 or Riichi)
   const isMenzen       = base === 'menzen'
   const openMeldLocked = isMenzen || isRiichi
-  const isLocked       = special !== 'none'
+  // 七対子: all fu sections disabled (fixed 25fu). 平和: only melds disabled (all sequences).
+  const isChiitoi      = special === 'chiitoi'
+  const isPinfu        = special === 'pinfu'
+  const sectionLocked  = isChiitoi
+  const meldsLocked    = isChiitoi || isPinfu
 
   const setMeld   = (key: keyof MeldCounts) => (n: number) =>
     setMelds((p) => ({ ...p, [key]: n }))
@@ -184,7 +191,7 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
     label, meldKey, fuEach, isOpenMeld,
   }: { label: string; meldKey: keyof MeldCounts; fuEach: number; isOpenMeld?: boolean }) {
     // Open melds (明刻/明杠) are disabled when the hand is closed or riichi
-    const disabled = (isOpenMeld && openMeldLocked) || isLocked
+    const disabled = (isOpenMeld && openMeldLocked) || meldsLocked
     return (
       <div className={`flex items-center justify-between rounded-xl px-3 py-2
         ${disabled ? 'bg-emerald-950/20 opacity-40' : 'bg-emerald-900/40'}`}>
@@ -210,7 +217,7 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
       {/* ── 特殊牌型 ── */}
       <div>
         <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-violet-400">特殊牌型（互斥）</p>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <TB
             active={special === 'chiitoi'}
             color="border-violet-500 bg-violet-900/50"
@@ -223,37 +230,41 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
             color="border-violet-500 bg-violet-900/50"
             onClick={() => {
               if (special === 'pinfu') { setSpecial('none'); return }
-              // 平和 requires 門清 → force menzen base
               setSpecial('pinfu')
               if (base !== 'menzen') handleBaseChange('menzen')
             }}
           >
-            平和<br />
-            <span className="font-normal opacity-70">{isTsumo ? '自摸 20符' : '荣和 30符'}</span>
+            平和<br /><span className="font-normal opacity-70">自摸 20符 / 荣和 30符</span>
           </TB>
         </div>
       </div>
 
-      <div className={`space-y-3 transition-opacity ${isLocked ? 'pointer-events-none opacity-25' : ''}`}>
+      {/* ── 当前模式 ── */}
+      <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold
+        ${isTsumo ? 'bg-sky-900/40 text-sky-300' : 'bg-emerald-900/40 text-emerald-300'}`}>
+        <span className="text-sm">{isTsumo ? '自摸' : '荣和'}</span>
+        <span>{isPinfu ? '（平和不计自摸+2符）' : isTsumo ? '（+2符）' : '（+0符）'}</span>
+        <span className="ml-auto text-[10px] opacity-60">由外部分配</span>
+      </div>
+
+      <div className={`space-y-3 transition-opacity ${sectionLocked ? 'pointer-events-none opacity-25' : ''}`}>
 
         {/* ── 底符 ── */}
         <div>
           <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-violet-400">底符</p>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <TB active={base === 'menzen'} onClick={() => handleBaseChange('menzen')} color="border-sky-500 bg-sky-900/50">
-              門前清荣和<br /><span className="font-normal opacity-70">30符</span>
+              門前清<br /><span className="font-normal opacity-70">30符</span>
             </TB>
-            {/* 副露 option is locked out when the winner is in riichi */}
-            <div className={isRiichi ? 'flex-1 opacity-30 pointer-events-none' : 'flex-1'}>
-              <TB active={base === 'other'} onClick={() => handleBaseChange('other')} color="border-sky-500 bg-sky-900/50">
-                自摸 / 副露荣和<br /><span className="font-normal opacity-70">20符</span>
+            <div className={isRiichi ? 'opacity-30 pointer-events-none' : ''}>
+              <TB active={base === 'other'} onClick={() => handleBaseChange('other')} color="border-orange-500 bg-orange-900/50">
+                副露<br /><span className="font-normal opacity-70">20符</span>
               </TB>
             </div>
           </div>
           {isRiichi && (
             <p className="mt-1 text-xs text-rose-700">🔒 立直必须门前清，副露已锁定</p>
           )}
-          {isTsumo && <p className="mt-1 text-xs text-sky-600">✦ 自摸加符 +2 已自动计入</p>}
           {openMeldLocked && !isRiichi && (
             <p className="mt-1 text-xs text-amber-700">⚠ 門前清：明刻 / 明杠 已禁用</p>
           )}
@@ -262,7 +273,7 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
         {/* ── 听牌型 ── */}
         <div>
           <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-violet-400">听牌型</p>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <TB active={wait === 'normal'} onClick={() => setWait('normal')} color="border-sky-500 bg-sky-900/50">
               两面 / 双碰<br /><span className="font-normal opacity-70">+0符</span>
             </TB>
@@ -275,10 +286,10 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
         {/* ── 雀头 ── */}
         <div>
           <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-violet-400">雀头（对子）</p>
-          <div className="flex gap-2">
-            <TB active={pair === 'suupai'}  onClick={() => setPair('suupai')}  color="border-sky-500 bg-sky-900/50">数牌/客风<br /><span className="font-normal opacity-70">+0符</span></TB>
-            <TB active={pair === 'yakuhai'} onClick={() => setPair('yakuhai')} color="border-sky-500 bg-sky-900/50">役牌<br /><span className="font-normal opacity-70">+2符</span></TB>
-            <TB active={pair === 'renfuu'}  onClick={() => setPair('renfuu')}  color="border-sky-500 bg-sky-900/50">连风牌<br /><span className="font-normal opacity-70">+4符</span></TB>
+          <div className="grid grid-cols-3 gap-2">
+            <TB active={pair === 'chuuchan'} onClick={() => setPair('chuuchan')} color="border-sky-500 bg-sky-900/50">中张数牌(2-8)/客风<br /><span className="font-normal opacity-70">+0符</span></TB>
+            <TB active={pair === 'honour'}   onClick={() => setPair('honour')}   color="border-amber-500 bg-amber-900/50">幺九数牌(1/9)/役牌<br /><span className="font-normal opacity-70">+2符</span></TB>
+            <TB active={pair === 'renfuu'}   onClick={() => setPair('renfuu')}   color="border-rose-500 bg-rose-900/50">连风牌<br /><span className="font-normal opacity-70">+4符</span></TB>
           </div>
         </div>
 
@@ -306,20 +317,26 @@ function FuCalculator({ isTsumo, isRiichi, onApply }: FuCalculatorProps) {
       </div>
 
       {/* ── Result ── */}
-      <div className="flex items-center justify-between rounded-xl bg-violet-900/40 px-4 py-3">
-        <div>
+      <div className="flex flex-col gap-2 rounded-xl bg-violet-900/40 px-4 py-3">
+        <div className="flex items-center justify-between">
           <p className="text-xs text-violet-400">计算结果</p>
-          <p className="text-xl font-black text-violet-200">
-            {resultFu} <span className="text-sm font-normal">符</span>
-          </p>
+          <button
+            type="button"
+            onClick={() => onApply(resultFu)}
+            className="rounded-xl bg-violet-600 px-5 py-2.5 font-bold text-white shadow-md transition-all active:scale-95 hover:bg-violet-500"
+          >
+            应用并关闭
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => onApply(resultFu)}
-          className="rounded-xl bg-violet-600 px-5 py-2.5 font-bold text-white shadow-md transition-all active:scale-95 hover:bg-violet-500"
-        >
-          应用并关闭
-        </button>
+        <p className="text-xs text-violet-500">
+          20(底符)
+          {base === 'menzen' ? ' + 10(門前)' : ''}
+          {isTsumo ? ' + 2(自摸)' : ''}
+          {wait === 'hard' ? ' + 2(嵌張/辺張/単騎)' : ''}
+          {pair === 'honour' ? ' + 2(幺九/役牌雀頭)' : pair === 'renfuu' ? ' + 4(連風雀頭)' : ''}
+          {(Object.keys(melds) as (keyof MeldCounts)[]).filter(k => melds[k] > 0).map(k => ` + ${melds[k] * MELD_FU[k]}(${k})`).join('')}
+          {' = '}{resultFu} 符
+        </p>
       </div>
     </div>
   )

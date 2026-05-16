@@ -36,7 +36,8 @@ function Counter({ value, min = 0, max = 99, onChange, disabled = false }: {
 
 type SpecialHand = 'none' | 'chiitoi' | 'pinfu'
 type WaitType   = 'normal' | 'hard'
-type PairType   = 'suupai' | 'yakuhai' | 'renfuu'
+type PairType   = 'chuuchan' | 'honour' | 'renfuu'
+// chuuchan = 中张数牌(2-8)/客风 → +0, honour = 幺九数牌(1/9)/役牌 → +2, renfuu = 连风 → +4
 type BaseType   = 'menzen' | 'other'
 
 interface MeldCounts {
@@ -58,7 +59,7 @@ function calcFuFromInputs(
   const baseFu  = base === 'menzen' ? 30 : 20
   const tsumoFu = isTsumo ? 2 : 0
   const waitFu  = wait === 'hard' ? 2 : 0
-  const pairFu  = pair === 'yakuhai' ? 2 : pair === 'renfuu' ? 4 : 0
+  const pairFu  = pair === 'honour' ? 2 : pair === 'renfuu' ? 4 : 0
   const meldFu  = (Object.keys(melds) as (keyof MeldCounts)[])
     .reduce((s, k) => s + melds[k] * MELD_FU[k], 0)
   return Math.ceil((baseFu + tsumoFu + waitFu + pairFu + meldFu) / 10) * 10
@@ -68,7 +69,7 @@ function FuCalculator({ onApply }: { onApply: (fu: number) => void }) {
   const [special, setSpecial] = useState<SpecialHand>('none')
   const [base,    setBase]    = useState<BaseType>('menzen')
   const [wait,    setWait]    = useState<WaitType>('normal')
-  const [pair,    setPair]    = useState<PairType>('suupai')
+  const [pair,    setPair]    = useState<PairType>('chuuchan')
   const [isTsumo, setIsTsumo] = useState(true)
   const [melds,   setMelds]   = useState<MeldCounts>({
     cm: 0, ca: 0, cmk: 0, cak: 0, ym: 0, ya: 0, ymk: 0, yak: 0,
@@ -86,7 +87,9 @@ function FuCalculator({ onApply }: { onApply: (fu: number) => void }) {
 
   const isMenzen       = base === 'menzen'
   const openMeldLocked = isMenzen
-  const isLocked       = special !== 'none'
+  const isChiitoi      = special === 'chiitoi'
+  const isPinfu        = special === 'pinfu'
+  const meldsLocked    = isChiitoi || isPinfu
 
   const setMeld = (key: keyof MeldCounts) => (n: number) =>
     setMelds((p) => ({ ...p, [key]: n }))
@@ -112,7 +115,7 @@ function FuCalculator({ onApply }: { onApply: (fu: number) => void }) {
   function MeldRow({ label, meldKey, fuEach, isOpenMeld }: {
     label: string; meldKey: keyof MeldCounts; fuEach: number; isOpenMeld?: boolean
   }) {
-    const disabled = (isOpenMeld && openMeldLocked) || isLocked
+    const disabled = (isOpenMeld && openMeldLocked) || meldsLocked
     return (
       <div className={`flex items-center justify-between rounded-xl px-3 py-2
         ${disabled ? 'bg-emerald-950/20 opacity-40' : 'bg-emerald-900/40'}`}>
@@ -131,66 +134,100 @@ function FuCalculator({ onApply }: { onApply: (fu: number) => void }) {
   return (
     <div className="space-y-3 rounded-2xl border border-violet-800 bg-violet-950/30 p-4">
       {/* Special hand type */}
-      <div className="flex gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <TB active={special === 'none'}   onClick={() => setSpecial('none')}   color="border-sky-500 bg-sky-900/50">一般手</TB>
         <TB active={special === 'chiitoi'} onClick={() => setSpecial('chiitoi')} color="border-amber-500 bg-amber-900/50">七対子</TB>
-        <TB active={special === 'pinfu'}   onClick={() => setSpecial('pinfu')}   color="border-emerald-500 bg-emerald-900/50">平和</TB>
+        <TB active={special === 'pinfu'}   onClick={() => {
+          if (special === 'pinfu') { setSpecial('none'); return }
+          setSpecial('pinfu')
+          if (base !== 'menzen') handleBaseChange('menzen')
+        }}   color="border-emerald-500 bg-emerald-900/50">平和<br /><span className="font-normal opacity-70">自摸 20符 / 荣和 30符</span></TB>
       </div>
 
-      {special === 'none' && (
-        <>
-          {/* Base type + Tsumo toggle */}
-          <div className="flex gap-2">
-            <TB active={base === 'menzen'} onClick={() => handleBaseChange('menzen')} color="border-sky-500 bg-sky-900/50">門前清</TB>
-            <TB active={base === 'other'}  onClick={() => handleBaseChange('other')}  color="border-orange-500 bg-orange-900/50">副露</TB>
-          </div>
+      {/* Tsumo/Ron toggle — hidden for chiitoi (fixed 25fu) */}
+      {!isChiitoi && (
+        <div className="grid grid-cols-2 gap-2">
+          <TB active={isTsumo}  onClick={() => setIsTsumo(true)}  color="border-sky-500 bg-sky-900/50">自摸 +2符</TB>
+          <TB active={!isTsumo} onClick={() => setIsTsumo(false)} color="border-emerald-500 bg-emerald-900/50">荣和 +0符</TB>
+        </div>
+      )}
 
-          {/* Tsumo toggle */}
-          <div className="flex gap-2">
-            <TB active={isTsumo}  onClick={() => setIsTsumo(true)}  color="border-emerald-500 bg-emerald-900/50">自摸 +2</TB>
-            <TB active={!isTsumo} onClick={() => setIsTsumo(false)} color="border-slate-500 bg-slate-900/50">荣和</TB>
+      {/* Base + Wait + Pair — hidden for chiitoi, locked for pinfu */}
+      {!isChiitoi && (
+        <>
+          {/* Base type — locked to menzen for pinfu */}
+          <div className={isPinfu ? 'opacity-30 pointer-events-none' : ''}>
+            <div className="grid grid-cols-2 gap-2">
+              <TB active={base === 'menzen'} onClick={() => handleBaseChange('menzen')} color="border-sky-500 bg-sky-900/50">門前清 30符</TB>
+              <TB active={base === 'other'}  onClick={() => handleBaseChange('other')}  color="border-orange-500 bg-orange-900/50">副露 20符</TB>
+            </div>
           </div>
+          {isPinfu && (
+            <p className="text-xs text-sky-700">🔒 平和必须門前清，底符已锁定</p>
+          )}
 
           {/* Wait type */}
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <TB active={wait === 'normal'} onClick={() => setWait('normal')} color="border-emerald-500 bg-emerald-900/50">両面/双碰</TB>
             <TB active={wait === 'hard'}   onClick={() => setWait('hard')}   color="border-rose-500 bg-rose-900/50">嵌張/辺張/単騎 +2</TB>
           </div>
 
           {/* Pair type */}
-          <div className="flex gap-2">
-            <TB active={pair === 'suupai'}  onClick={() => setPair('suupai')}  color="border-emerald-500 bg-emerald-900/50">数牌/客風</TB>
-            <TB active={pair === 'yakuhai'} onClick={() => setPair('yakuhai')} color="border-amber-500 bg-amber-900/50">役牌 +2</TB>
-            <TB active={pair === 'renfuu'}  onClick={() => setPair('renfuu')}  color="border-rose-500 bg-rose-900/50">連風 +4</TB>
-          </div>
-
-          {/* Melds */}
-          <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase text-emerald-500 tracking-widest px-1">中张牌 (2-8)</p>
-            <MeldRow label="明刻" meldKey="cm"  fuEach={2}  isOpenMeld />
-            <MeldRow label="暗刻" meldKey="ca"  fuEach={4} />
-            <MeldRow label="明杠" meldKey="cmk" fuEach={8}  isOpenMeld />
-            <MeldRow label="暗杠" meldKey="cak" fuEach={16} />
-
-            <p className="text-[10px] font-bold uppercase text-emerald-500 tracking-widest px-1 pt-1">幺九牌 (1/9/字)</p>
-            <MeldRow label="明刻" meldKey="ym"  fuEach={4}  isOpenMeld />
-            <MeldRow label="暗刻" meldKey="ya"  fuEach={8} />
-            <MeldRow label="明杠" meldKey="ymk" fuEach={16} isOpenMeld />
-            <MeldRow label="暗杠" meldKey="yak" fuEach={32} />
+          <div className="grid grid-cols-3 gap-2">
+            <TB active={pair === 'chuuchan'} onClick={() => setPair('chuuchan')} color="border-emerald-500 bg-emerald-900/50">中张(2-8)/客風 +0</TB>
+            <TB active={pair === 'honour'}   onClick={() => setPair('honour')}   color="border-amber-500 bg-amber-900/50">幺九(1/9)/役牌 +2</TB>
+            <TB active={pair === 'renfuu'}   onClick={() => setPair('renfuu')}   color="border-rose-500 bg-rose-900/50">連風 +4</TB>
           </div>
         </>
       )}
 
+      {/* Melds — dimmed for pinfu/chiitoi (no kongs/pons) */}
+      <div className={`space-y-1.5 ${meldsLocked ? 'pointer-events-none opacity-25' : ''}`}>
+        <p className="text-[10px] font-bold uppercase text-emerald-500 tracking-widest px-1">中张牌 (2-8)</p>
+        <MeldRow label="明刻" meldKey="cm"  fuEach={2}  isOpenMeld />
+        <MeldRow label="暗刻" meldKey="ca"  fuEach={4} />
+        <MeldRow label="明杠" meldKey="cmk" fuEach={8}  isOpenMeld />
+        <MeldRow label="暗杠" meldKey="cak" fuEach={16} />
+
+        <p className="text-[10px] font-bold uppercase text-emerald-500 tracking-widest px-1 pt-1">幺九牌 (1/9/字)</p>
+        <MeldRow label="明刻" meldKey="ym"  fuEach={4}  isOpenMeld />
+        <MeldRow label="暗刻" meldKey="ya"  fuEach={8} />
+        <MeldRow label="明杠" meldKey="ymk" fuEach={16} isOpenMeld />
+        <MeldRow label="暗杠" meldKey="yak" fuEach={32} />
+      </div>
+      {isPinfu && (
+        <p className="text-xs text-sky-700">🔒 平和必须全顺子，面子已禁用</p>
+      )}
+
       {/* Result */}
-      <div className="flex items-center justify-between rounded-xl bg-emerald-900/60 px-4 py-3">
-        <span className="text-xs text-emerald-400">计算结果</span>
-        <span className="text-xl font-black text-white">{resultFu} 符</span>
-        <button
-          onClick={() => onApply(resultFu)}
-          className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-500 active:scale-95 transition-all"
-        >
-          应用
-        </button>
+      <div className="flex flex-col gap-2 rounded-xl bg-emerald-900/60 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-emerald-400">计算结果</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xl font-black text-white">{resultFu} 符</span>
+            <button
+              onClick={() => onApply(resultFu)}
+              className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-500 active:scale-95 transition-all"
+            >
+              应用
+            </button>
+          </div>
+        </div>
+        <p className="text-[11px] text-emerald-500">
+          20(底符)
+          {special === 'chiitoi' ? ' → 七対子 固定25符' : ''}
+          {special === 'pinfu' ? (isTsumo ? ' → 平和自摸 20符' : ' → 平和荣和 30符') : ''}
+          {special === 'none' && (
+            <>
+              {base === 'menzen' ? ' + 10(門前)' : ''}
+              {isTsumo ? ' + 2(自摸)' : ''}
+              {wait === 'hard' ? ' + 2(嵌張/辺張/単騎)' : ''}
+              {pair === 'honour' ? ' + 2(幺九/役牌雀頭)' : pair === 'renfuu' ? ' + 4(連風雀頭)' : ''}
+              {(Object.keys(melds) as (keyof MeldCounts)[]).filter(k => melds[k] > 0).map(k => ` + ${melds[k] * MELD_FU[k]}(${k})`).join('')}
+            </>
+          )}
+          {' = '}{resultFu} 符
+        </p>
       </div>
     </div>
   )
