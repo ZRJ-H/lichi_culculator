@@ -1,0 +1,19 @@
+{
+  "name": "雀魂麻将计分器",
+  "short_name": "雀魂计分",
+  "description": "立直麻将点数计算器，支持对局计分与独立算分",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#022c22",
+  "theme_color": "#022c22",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

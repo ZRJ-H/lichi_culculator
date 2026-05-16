@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="100" fill="#022c22"/>
+  <g transform="translate(256,256)">
+    <!-- Coin shape -->
+    <circle r="180" fill="none" stroke="#f59e0b" stroke-width="28"/>
+    <!-- Inner square (mahjong tile style) -->
+    <rect x="-70" y="-70" width="140" height="140" rx="20" fill="#f59e0b" stroke="#fbbf24" stroke-width="10"/>
+    <!-- 点 character in center -->
+    <text x="0" y="18" text-anchor="middle" font-size="72" font-weight="900" fill="#022c22" font-family="sans-serif">点</text>
+    <!-- Small dots for decoration -->
+    <circle cx="-100" cy="140" r="12" fill="#f59e0b"/>
+    <circle cx="100" cy="140" r="12" fill="#f59e0b"/>
+    <circle cx="0" cy="155" r="12" fill="#f59e0b"/>
+  </g>
+</svg>
